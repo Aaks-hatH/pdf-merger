@@ -1,0 +1,284 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PDF Stitcher</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Sortable/1.15.0/Sortable.min.js"></script>
+<style>
+  :root {
+    --bg: #f6f6f4; --card: #ffffff; --text: #1d1d1b; --muted: #6b6b66;
+    --border: #dcdcd6; --accent: #2f5bea; --accent-text: #fff; --danger: #d23b3b;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #151516; --card: #202022; --text: #f0f0ee; --muted: #9a9a94;
+      --border: #3a3a3d; --accent: #6b8cff; --accent-text: #0d0d0f; --danger: #ff6b6b;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  .wrap { max-width: 1100px; margin: 0 auto; padding: 24px 16px 120px; }
+  h1 { font-size: 26px; margin: 0 0 4px; }
+  p.sub { color: var(--muted); margin: 0 0 20px; }
+
+  #drop {
+    border: 2px dashed var(--border); border-radius: 14px; background: var(--card);
+    padding: 36px 16px; text-align: center; cursor: pointer; transition: .15s;
+  }
+  #drop.over, #drop:hover { border-color: var(--accent); }
+  #drop strong { display: block; font-size: 17px; margin-bottom: 4px; }
+  #drop span { color: var(--muted); }
+
+  .toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 20px 0 12px; }
+  .toolbar .grow { flex: 1; }
+  button {
+    font: inherit; cursor: pointer; border-radius: 9px; padding: 8px 14px;
+    border: 1px solid var(--border); background: var(--card); color: var(--text);
+  }
+  button:hover { border-color: var(--accent); }
+  button.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); font-weight: 600; }
+  button.primary:disabled { opacity: .45; cursor: not-allowed; }
+
+  #files { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
+  .chip {
+    display: flex; align-items: center; gap: 8px; padding: 4px 6px 4px 12px;
+    border: 1px solid var(--border); background: var(--card); border-radius: 999px; font-size: 13px;
+  }
+  .chip i { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+  .chip button { padding: 0 8px; border: none; background: none; color: var(--muted); font-size: 16px; line-height: 1.4; }
+  .chip button:hover { color: var(--danger); }
+
+  #grid {
+    display: grid; gap: 14px;
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  }
+  .page {
+    background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+    padding: 8px; position: relative; cursor: grab; user-select: none;
+  }
+  .page.sortable-ghost { opacity: .35; }
+  .page.sortable-chosen { border-color: var(--accent); }
+  .thumb {
+    aspect-ratio: 1 / 1; display: flex; align-items: center; justify-content: center;
+    background: var(--bg); border-radius: 8px; overflow: hidden;
+  }
+  .thumb img {
+    max-width: 100%; max-height: 100%; background: #fff;
+    box-shadow: 0 1px 4px rgba(0,0,0,.25); transition: transform .2s; pointer-events: none;
+  }
+  .meta { display: flex; align-items: center; justify-content: space-between; margin-top: 6px; font-size: 12px; color: var(--muted); }
+  .meta .num { font-weight: 700; color: var(--text); }
+  .meta .src { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 90px; }
+  .tag { position: absolute; top: 12px; left: 12px; width: 10px; height: 10px; border-radius: 50%; border: 1px solid rgba(0,0,0,.3); }
+  .actions { position: absolute; top: 12px; right: 12px; display: flex; gap: 4px; opacity: 0; transition: .15s; }
+  .page:hover .actions, .page:focus-within .actions { opacity: 1; }
+  @media (hover: none) { .actions { opacity: 1; } }
+  .actions button { padding: 2px 7px; font-size: 14px; background: var(--card); }
+  .actions .del:hover { border-color: var(--danger); color: var(--danger); }
+
+  #status { color: var(--muted); font-size: 13px; }
+  .empty { text-align: center; color: var(--muted); padding: 30px 0; display: none; }
+  .bar {
+    position: fixed; left: 0; right: 0; bottom: 0; background: var(--card);
+    border-top: 1px solid var(--border); padding: 12px 16px;
+  }
+  .bar .in { max-width: 1100px; margin: 0 auto; display: flex; gap: 12px; align-items: center; }
+  .bar .in span { flex: 1; color: var(--muted); font-size: 13px; }
+  progress { width: 120px; display: none; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>PDF Stitcher</h1>
+  <p class="sub">Add PDFs, drag pages into the order you want, then download one merged file. Everything runs in your browser; nothing is uploaded.</p>
+
+  <div id="drop" tabindex="0">
+    <strong>Drop PDFs here or click to choose</strong>
+    <span>You can add more files at any time</span>
+    <input id="picker" type="file" accept="application/pdf" multiple hidden>
+  </div>
+
+  <div class="toolbar">
+    <div id="files"></div>
+  </div>
+  <div class="toolbar">
+    <button id="sortFiles" title="Group pages back by the order files were added">Group by file</button>
+    <button id="reverse">Reverse order</button>
+    <button id="clear">Clear all</button>
+    <span class="grow"></span>
+    <span id="status"></span>
+  </div>
+
+  <div id="grid"></div>
+  <div class="empty" id="empty">No pages yet. Add a PDF to get started.</div>
+</div>
+
+<div class="bar">
+  <div class="in">
+    <span id="summary">0 pages</span>
+    <progress id="prog" value="0" max="1"></progress>
+    <button class="primary" id="merge" disabled>Merge &amp; download</button>
+  </div>
+</div>
+
+<script>
+pdfjsLib.GlobalWorkerOptions.workerSrc =
+  "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+
+const COLORS = ["#2f5bea","#e0861b","#1f9d6b","#c2409b","#7a4fe0","#d23b3b","#0e97b5","#8a8f1c"];
+const files = [];   // {id, name, buffer, color, pages}
+const pages = [];   // {id, fileId, pageIndex, rotation, thumb}
+let uid = 0;
+
+const $ = (s) => document.querySelector(s);
+const grid = $("#grid"), drop = $("#drop"), picker = $("#picker");
+
+/* ---------- Add files ---------- */
+drop.addEventListener("click", () => picker.click());
+drop.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") picker.click(); });
+picker.addEventListener("change", () => { addFiles(picker.files); picker.value = ""; });
+["dragenter","dragover"].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add("over"); }));
+["dragleave","drop"].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove("over"); }));
+drop.addEventListener("drop", e => addFiles(e.dataTransfer.files));
+
+async function addFiles(list) {
+  const pdfs = [...list].filter(f => f.type === "application/pdf" || /\.pdf$/i.test(f.name));
+  if (!pdfs.length) return setStatus("Please choose PDF files.");
+  for (const f of pdfs) {
+    try {
+      setStatus(`Reading ${f.name}…`);
+      const buffer = await f.arrayBuffer();
+      // pdf.js transfers its buffer to a worker, so give it a copy
+      const doc = await pdfjsLib.getDocument({ data: buffer.slice(0) }).promise;
+      const file = { id: ++uid, name: f.name, buffer, color: COLORS[files.length % COLORS.length], pages: doc.numPages };
+      files.push(file);
+      for (let i = 0; i < doc.numPages; i++) {
+        const page = await doc.getPage(i + 1);
+        const vp = page.getViewport({ scale: 0.4 });
+        const canvas = document.createElement("canvas");
+        canvas.width = vp.width; canvas.height = vp.height;
+        await page.render({ canvasContext: canvas.getContext("2d"), viewport: vp }).promise;
+        pages.push({ id: ++uid, fileId: file.id, pageIndex: i, rotation: 0, thumb: canvas.toDataURL("image/jpeg", 0.7) });
+        render();
+      }
+    } catch (err) {
+      console.error(err);
+      setStatus(`Couldn't read ${f.name} (it may be corrupted or password-protected).`);
+      continue;
+    }
+  }
+  setStatus("");
+  render();
+}
+
+/* ---------- Render ---------- */
+function render() {
+  grid.innerHTML = "";
+  pages.forEach((p, i) => {
+    const f = files.find(x => x.id === p.fileId);
+    const el = document.createElement("div");
+    el.className = "page";
+    el.dataset.id = p.id;
+    el.innerHTML = `
+      <span class="tag" style="background:${f.color}"></span>
+      <div class="actions">
+        <button class="rot" title="Rotate 90°" aria-label="Rotate">⟳</button>
+        <button class="del" title="Remove page" aria-label="Remove page">✕</button>
+      </div>
+      <div class="thumb"><img alt="" src="${p.thumb}" style="transform:rotate(${p.rotation}deg)"></div>
+      <div class="meta"><span class="num">${i + 1}</span><span class="src" title="${esc(f.name)}">${esc(f.name)} · p${p.pageIndex + 1}</span></div>`;
+    el.querySelector(".rot").onclick = () => { p.rotation = (p.rotation + 90) % 360; render(); };
+    el.querySelector(".del").onclick = () => { pages.splice(pages.indexOf(p), 1); render(); };
+    grid.appendChild(el);
+  });
+
+  const chips = $("#files");
+  chips.innerHTML = "";
+  files.forEach(f => {
+    const c = document.createElement("div");
+    c.className = "chip";
+    c.innerHTML = `<i style="background:${f.color}"></i>${esc(f.name)}<button title="Remove file" aria-label="Remove file">×</button>`;
+    c.querySelector("button").onclick = () => {
+      files.splice(files.indexOf(f), 1);
+      for (let i = pages.length - 1; i >= 0; i--) if (pages[i].fileId === f.id) pages.splice(i, 1);
+      render();
+    };
+    chips.appendChild(c);
+  });
+
+  $("#empty").style.display = pages.length ? "none" : "block";
+  $("#summary").textContent = `${pages.length} page${pages.length === 1 ? "" : "s"} from ${files.length} file${files.length === 1 ? "" : "s"}`;
+  $("#merge").disabled = pages.length === 0;
+}
+
+new Sortable(grid, {
+  animation: 150,
+  ghostClass: "sortable-ghost",
+  filter: ".actions",
+  preventOnFilter: false,
+  onEnd: (e) => {
+    if (e.oldIndex === e.newIndex) return;
+    const [moved] = pages.splice(e.oldIndex, 1);
+    pages.splice(e.newIndex, 0, moved);
+    render();
+  }
+});
+
+/* ---------- Toolbar ---------- */
+$("#reverse").onclick = () => { pages.reverse(); render(); };
+$("#sortFiles").onclick = () => {
+  const order = new Map(files.map((f, i) => [f.id, i]));
+  pages.sort((a, b) => order.get(a.fileId) - order.get(b.fileId) || a.pageIndex - b.pageIndex);
+  render();
+};
+$("#clear").onclick = () => {
+  if (pages.length && !confirm("Remove all files and pages?")) return;
+  files.length = 0; pages.length = 0; render();
+};
+
+/* ---------- Merge ---------- */
+$("#merge").onclick = async () => {
+  const btn = $("#merge"), prog = $("#prog");
+  btn.disabled = true; prog.style.display = "block"; prog.max = pages.length; prog.value = 0;
+  try {
+    const { PDFDocument, degrees } = PDFLib;
+    const out = await PDFDocument.create();
+    const sources = new Map();
+    for (let i = 0; i < pages.length; i++) {
+      const p = pages[i];
+      if (!sources.has(p.fileId)) {
+        const f = files.find(x => x.id === p.fileId);
+        sources.set(p.fileId, await PDFDocument.load(f.buffer.slice(0), { ignoreEncryption: true }));
+      }
+      const [copied] = await out.copyPages(sources.get(p.fileId), [p.pageIndex]);
+      if (p.rotation) copied.setRotation(degrees((copied.getRotation().angle + p.rotation) % 360));
+      out.addPage(copied);
+      prog.value = i + 1;
+    }
+    const bytes = await out.save();
+    const url = URL.createObjectURL(new Blob([bytes], { type: "application/pdf" }));
+    const a = document.createElement("a");
+    a.href = url; a.download = "merged.pdf";
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+    setStatus("Done. merged.pdf downloaded.");
+  } catch (err) {
+    console.error(err);
+    setStatus("Something went wrong while merging. Check the console for details.");
+  } finally {
+    prog.style.display = "none"; btn.disabled = pages.length === 0;
+  }
+};
+
+function setStatus(t) { $("#status").textContent = t; }
+function esc(s) { return s.replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c])); }
+render();
+</script>
+</body>
+</html>
